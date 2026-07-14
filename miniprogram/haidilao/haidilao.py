@@ -46,6 +46,17 @@ def build_proxies():
 
 PROXIES = build_proxies()
 
+def clean_token(token):
+    # 去掉首尾空白，并移除常见不可见字符（BOM、零宽空格、方向标记等）
+    token = token.strip()
+    for ch in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u00a0"):
+        token = token.replace(ch, "")
+    return token
+
+def token_bad_chars(token):
+    # 返回无法放入 HTTP 头(latin-1)的字符列表 [(位置, repr, 码点)]
+    return [(i, repr(c), f"U+{ord(c):04X}") for i, c in enumerate(token) if ord(c) > 255]
+
 def build_headers(token):
     return {
         "Host": "superapp-public.kiwa-tech.com",
@@ -146,11 +157,19 @@ def main():
     if PROXIES:
         print(f"[INFO] 已启用代理出口: {list(PROXIES.values())[0]}")
 
-    tokens = [t for t in raw.split("@") if t]
+    tokens = [clean_token(t) for t in raw.split("@") if clean_token(t)]
     print(f"[INFO] 共找到 {len(tokens)} 个账号")
     lines = []
     with requests.Session() as session:
         for i, token in enumerate(tokens, 1):
+            bad = token_bad_chars(token)
+            if bad:
+                info = ", ".join(f"位置{p}:{c}({h})" for p, c, h in bad[:5])
+                line = (f"账号{i}: ❌token 含非法字符（{info}）。"
+                        f"请用 Charles 重新完整复制 token，勿经聊天/文档中转")
+                print(line)
+                lines.append(line)
+                continue
             msg, ok = sign_in(session, token, i)
             frag = query_fragment(session, token, i) if ok else ""
             line = f"{msg}{('，' + frag) if frag else ''}"
